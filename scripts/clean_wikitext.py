@@ -3,6 +3,10 @@ import os
 import re
 
 
+def shrink_spaces(s):
+    return re.sub(r" +", " ", s).strip()
+
+
 if __name__ == "__main__":
 
     for corpus, extension in [("2", "tokens"), ("103-raw", "raw")]:
@@ -24,10 +28,11 @@ if __name__ == "__main__":
                 if line == "" or line.startswith(" ="):
                     continue
 
-                line = re.sub(r"[0-9]+", "<num>", line)
-                line = re.sub(r"@-@", "<dash>", line)
-                line = re.sub(r"@\.@", "<num_dot>", line)
-                line = re.sub(r"@,@", "<num_comma>", line)
+                line = re.sub(r"[0-9]+", " <num> ", line)
+                line = re.sub(r"@-@", " <dash> ", line)
+                line = re.sub(r"@\.@", " <num_dot> ", line)
+                line = re.sub(r"@,@", " <num_comma> ", line)
+                line = shrink_spaces(line)
 
                 # Segment into sentences / independent clauses by tokenised '.', ';'.
                 lines = []
@@ -49,7 +54,7 @@ if __name__ == "__main__":
 
                 for line in lines:
                     no_punctuation = re.sub(r"[^A-Za-z'<>_]", " ", line)
-                    no_punctuation = re.sub(r" +", " ", no_punctuation).strip()
+                    no_punctuation = shrink_spaces(no_punctuation)
                     wf_inputs.write(no_punctuation + "\n")
                     wf_labels.write(line + "\n")
 
@@ -59,8 +64,12 @@ if __name__ == "__main__":
                 with open(os.path.join(root, f"wiki.vocab.tsv"), "w") as wf_voc:
 
                     # Special tokens first!
-                    for token in ["<pad>", "<sos>", "<eos>"]:
-                        wf_voc.write(f"{token}\t0\n")
+                    unk_count = counts["<unk>"]
+                    del counts["<unk>"]
+                    wf_voc.write("<pad>\t0\n")
+                    wf_voc.write(f"<unk>\t{unk_count}\n")
+                    wf_voc.write("<sos>\t0\n")
+                    wf_voc.write("<eos>\t0\n")
 
                     for token, count in counts.most_common():
                         wf_voc.write(f"{token}\t{count}\n")
