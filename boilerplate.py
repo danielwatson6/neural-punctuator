@@ -73,7 +73,6 @@ class DataLoader:
     def __init__(self, method=None, **hparams):
         self._method = method
         self.hparams = {**self.default_hparams, **hparams}
-        self._data = self.load()
 
     @property
     def method(self):
@@ -87,11 +86,10 @@ class DataLoader:
     def hparams(self, value):
         self._hparams = Hyperparameters(value)
 
-    @property
-    def data(self):
-        return self._data
+    def __call__(self, *a, **kw):
+        return self.call(*a, **kw)
 
-    def load(self):
+    def call(self):
         raise NotImplementedError
 
 

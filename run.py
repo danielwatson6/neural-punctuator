@@ -44,8 +44,8 @@ if __name__ == "__main__":
     del kwargs["save_dir"]
     del kwargs["data_loader"]
 
-    model = Model(os.path.join("experiments", FLAGS.save_dir), **hparams)
-    dataset = DataLoader(**hparams).data
+    model = Model(os.path.join("experiments", FLAGS.save_dir), **kwargs)
+    dataset = DataLoader(**kwargs)
 
     try:
         model.restore()
