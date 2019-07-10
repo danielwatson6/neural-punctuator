@@ -11,68 +11,74 @@ import tensorflow.keras.layers as tfkl
 import boilerplate as tfbp
 
 
-def Attention(queries_size, encoded_size, hidden_size, style="bahdanau"):
+class Attention(tfkl.Layer):
     """Attention mechanism."""
-    queries = tfkl.Input(shape=tf.TensorShape([None, queries_size]))
-    encoded = tfkl.Input(shape=tf.TensorShape([None, encoded_size]))
 
-    h = tf.expand_dims(queries, 2)
-    e = tf.expand_dims(encoded, 1)
-    if style == "bahdanau":
-        W1 = tfkl.Dense(hidden_size)
-        W2 = tfkl.Dense(hidden_size)
-        V = tfkl.Dense(1, use_bias=False)
+    def __init__(self, hidden_size, style="bahdanau", **kwargs):
+        super().__init__(**kwargs)
+        self.style = style
+        if style == "bahdanau":
+            self.W1 = tfkl.Dense(hidden_size)
+            self.W2 = tfkl.Dense(hidden_size)
+            self.V = tfkl.Dense(1, use_bias=False)
+        else:
+            self.W = tfkl.Dense(hidden_size, use_bias=False)
 
-        # (b, 1, te, h) + (b, td, 1, h) = (b, td, te, h) -> (b, td, te, 1)
-        score = V(tf.math.tanh(W1(e) + W2(h)))
-    else:
-        W = tfkl.Dense(hidden_size, use_bias=False)
-        score = encoded @ W(h)
+    def call(self, x):
+        h, e = x
+        h = tf.expand_dims(h, 2)
+        e = tf.expand_dims(e, 1)
 
-    # (b, td, te, 1) * (b, 1, te, he) = (b, td, te, he) -> (b, td, he)
-    result = tf.reduce_sum(tf.nn.softmax(score, axis=2) * e, axis=2)
-    return tf.keras.Model(inputs=[queries, encoded], outputs=result)
+        if self.style == "bahdanau":
+            score = self.V(tf.math.tanh(self.W1(e) + self.W2(h)))
+        else:
+            score = e @ self.W(h)
+
+        return tf.reduce_sum(tf.nn.softmax(score, axis=2) * e, axis=2)
 
 
-def Decoder(
-    vocab_size,
-    embed_size,
-    hidden_size,
-    num_layers,
-    attention="bahdanau",
-    attention_pos=0,
-    dropout=0.0,
-):
+class Decoder(tfkl.Layer):
     """Attention-based GRU decoder."""
-    decoder_in = tfkl.Input(shape=tf.TensorShape([None, embed_size]))
-    # The encoder is bidirectional and the left and right outputs are concatenated.
-    encoder_out = tfkl.Input(shape=tf.TensorShape([None, 2 * hidden_size]))
 
-    initial_state_dense = tfkl.Dense(num_layers * hidden_size, activation=tf.math.tanh)
-    gru_layers = [
-        tfkl.GRU(hidden_size, dropout=dropout, return_sequences=True)
-        for _ in range(num_layers)
-    ]
-    softmax_dense = tfkl.TimeDistributed(
-        tfkl.Dense(vocab_size, activation=tf.nn.softmax)
-    )
+    def __init__(
+        self,
+        vocab_size,
+        hidden_size,
+        num_layers,
+        attention="bahdanau",
+        attention_pos=0,
+        dropout=0.0,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.attention_pos = attention_pos
 
-    h0 = tf.reshape(encoder_out[:, 0, :], [-1, hidden_size])
-    initial_states = tf.reshape(initial_state_dense(h0), [-1, num_layers, hidden_size])
-    initial_states = tf.unstack(initial_states, num_layers, axis=1)
+        # Initial states for the decoder are outputted by W1(enc_out[0]).
+        self.W1 = tfkl.Dense(num_layers * hidden_size, activation=tf.math.tanh)
+        self.grus = [
+            tfkl.GRU(hidden_size, dropout=dropout, return_sequences=True)
+            for _ in range(num_layers)
+        ]
+        self.attention = Attention(hidden_size, style=attention)
+        self.W2 = tfkl.TimeDistributed(tfkl.Dense(vocab_size, activation=tf.nn.softmax))
 
-    dec_in = decoder_in
-    for i in range(num_layers + 1):
-        if i == attention_pos:
-            attn = Attention(
-                dec_in.shape[2], encoder_out.shape[2], hidden_size, style=attention
-            )([dec_in, encoder_out])
-            dec_in = tf.concat([attn, dec_in], 2)
-        if i < num_layers:
-            dec_in = gru_layers[i](dec_in, initial_state=initial_states[i])
+    def call(self, x):
+        dec_in, enc_out = x
 
-    probs = softmax_dense(dec_in)
-    return tf.keras.Model(inputs=[decoder_in, encoder_out], outputs=probs)
+        initial_states = tf.reshape(
+            self.W1(enc_out[:, 0, :]), [-1, self.num_layers, self.hidden_size]
+        )
+        initial_states = tf.unstack(initial_states, self.num_layers, axis=1)
+
+        for i in range(self.num_layers + 1):
+            if i == self.attention_pos:
+                dec_in = tf.concat([self.attention([dec_in, enc_out]), dec_in], 2)
+            if i < self.num_layers:
+                dec_in = self.grus[i](dec_in, initial_state=initial_states[i])
+
+        return self.W2(dec_in)
 
 
 @tfbp.default_export
@@ -101,11 +107,11 @@ class Seq2Seq(tfbp.Model):
 
         self.embed = self._make_embed()
 
-        self.encoder = tf.keras.Sequential()
         dropout = 0.0
         if self.method == "fit":
             dropout = self.hparams.dropout
 
+        self.encoder = tf.keras.Sequential()
         for _ in range(self.hparams.rnn_layers):
             self.encoder.add(
                 tfkl.Bidirectional(
@@ -117,12 +123,11 @@ class Seq2Seq(tfbp.Model):
 
         self.decoder = Decoder(
             self.hparams.vocab_size,
-            300,
             self.hparams.hidden_size,
             self.hparams.rnn_layers,
-            self.hparams.attention,
-            self.hparams.attention_pos,
-            self.hparams.dropout,
+            attention=self.hparams.attention,
+            attention_pos=self.hparams.attention_pos,
+            dropout=dropout,
         )
 
     def _make_embed(self):
@@ -145,6 +150,13 @@ class Seq2Seq(tfbp.Model):
             embeddings_initializer=tf.initializers.constant(embedding_matrix),
         )
 
+    def _loss(self, y_true, y_pred):
+        mask = tf.cast(tf.math.not_equal(y_true, 0), tf.float32)
+        seq_lengths = tf.expand_dims(tf.reduce_sum(mask, axis=1), 1)
+        ce = tf.losses.SparseCategoricalCrossentropy(reduction=tf.losses.Reduction.NONE)
+        result = ce(y_true, y_pred, sample_weight=mask)
+        return tf.reduce_mean(result / seq_lengths)
+
     def call(self, x):
         y = None
         if self.method == "fit":
@@ -157,7 +169,11 @@ class Seq2Seq(tfbp.Model):
         if self.method == "fit":
             # Teacher forcing: prepend a <sos> token to the start of every sequence.
             decoder_in = self.embed(tf.concat([[[2]] * y.shape[0], y[:, :-1]], 1))
-            return self.decoder([decoder_in, encoded])
+            decoded = self.decoder([decoder_in, encoded])
+
+        ...
+
+        return decoded
 
     def fit(self, data_loader):
         """Method invoked by `run.py`."""
@@ -171,7 +187,7 @@ class Seq2Seq(tfbp.Model):
         # Train/validation split. Keep a copy of the original validation data to
         # evalute at the end of every epoch without falling to an infinite loop.
         train_dataset, valid_dataset_orig = data_loader()
-        valid_dataset = valid_dataset_orig.repeat()
+        valid_dataset = iter(valid_dataset_orig)
 
         # TensorBoard writers.
         train_writer = tf.summary.create_file_writer(
@@ -181,25 +197,25 @@ class Seq2Seq(tfbp.Model):
             os.path.join(self.save_dir, "valid")
         )
 
-        ce = tf.losses.SparseCategoricalCrossentropy(reduction=tf.losses.Reduction.NONE)
         max_eval_score = float("-inf")
 
         while self.epoch.numpy() < self.hparams.epochs:
             for x, y in train_dataset:
 
+                # TODO: try to remove this
                 if not self.built:
                     self([x, y])
 
-                mask = tf.cast(tf.math.not_equal(y, 0), tf.float32)
-                train_loss = lambda: tf.reduce_mean(
-                    ce(y, self([x, y]), sample_weight=mask)
-                )
-                opt.minimize(train_loss, self.trainable_weights)
+                with tf.GradientTape() as g:
+                    train_loss = self._loss(y, self([x, y]))
+
+                grads = g.gradient(train_loss, self.trainable_weights)
+                opt.apply_gradients(zip(grads, self.trainable_weights))
 
                 step = self.step.numpy()
                 if step % 100 == 0:
                     x, y = next(valid_dataset)
-                    valid_loss = tf.reduce_mean(ce(y, self([x, y])))
+                    valid_loss = self._loss(y, self([x, y]))
 
                     with train_writer.as_default():
                         tf.summary.scalar("cross_entropy", train_loss, step=step)
