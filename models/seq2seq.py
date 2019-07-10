@@ -1,3 +1,5 @@
+"""Word-level seq2seq model with attention."""
+
 import os
 
 import editdistance
@@ -9,33 +11,74 @@ import tensorflow.keras.layers as tfkl
 import boilerplate as tfbp
 
 
-def Attention(hidden_size, style="bahdanau"):
-    h = tfkl.Input(shape=tf.TensorShape([hidden_size]))
+def Attention(input_size, hidden_size, style="bahdanau"):
+    """Attention mechanism."""
+    queries = tfkl.Input(shape=tf.TensorShape([None, input_size]))
     encoded = tfkl.Input(shape=tf.TensorShape([None, hidden_size]))
 
-    h_exp = tf.expand_dims(h, 0)
-
+    h = tf.expand_dims(queries, 2)
     if style == "bahdanau":
         W1 = tfkl.Dense(hidden_size)
         W2 = tfkl.Dense(hidden_size)
         V = tfkl.Dense(1, use_bias=False)
-        score = V(tf.nn.tanh(W1(encoded) + W2(h_exp)))
+
+        score = V(tf.nn.tanh(W1(encoded) + W2(h)))
     else:
         W = tfkl.Dense(hidden_size, use_bias=False)
-        score = encoded @ W(h_exp)
+        score = encoded @ W(h)
 
-    v = tf.reduce_sum(tf.nn.softmax(score, axis=0) * encoded, axis=1)
-    return tf.keras.Model(inputs=[h, encoded], outputs=v)
+    result = tf.reduce_sum(tf.nn.softmax(score, axis=2) * encoded, axis=2)
+    return tf.keras.Model(inputs=[queries, encoded], outputs=result)
+
+
+def Decoder(
+    vocab_size,
+    embed_size,
+    hidden_size,
+    num_layers,
+    attention="bahdanau",
+    attention_pos=0,
+    dropout=0.0,
+):
+    """Attention-based GRU decoder."""
+    decoder_in = tfkl.Input(shape=tf.TensorShape([None, embed_size]))
+    # The encoder is bidirectional and the left and right outputs are concatenated.
+    encoder_out = tfkl.Input(shape=tf.TensorShape([None, 2 * hidden_size]))
+
+    initial_state_dense = tfkl.Dense(num_layers * hidden_size)
+    gru_layers = [
+        tfkl.GRU(hidden_size, dropout=dropout, return_sequences=True)
+        for _ in range(num_layers)
+    ]
+    softmax_dense = tfkl.TimeDistributed(tfkl.Dense(vocab_size))
+
+    h0 = tf.reshape(encoder_out[:, 0, :], [-1, hidden_size])
+    initial_states = tf.reshape(initial_state_dense(h0), [-1, num_layers, hidden_size])
+    initial_states = tf.unstack(initial_states, num_layers, axis=1)
+
+    dec_in = decoder_in
+    for i in range(num_layers + 1):
+        if i == attention_pos:
+            attn = Attention(dec_in.shape[2], hidden_size, style=attention)(
+                [dec_in, encoder_out]
+            )
+            dec_in = tf.concat([attn, dec_in], 2)
+        if i < num_layers:
+            dec_in = gru_layers[i](dec_in, initial_state=initial_states[i])
+
+    probs = softmax_dense(dec_in)
+    return tf.keras.Model(inputs=[decoder_in, encoder_out], outputs=probs)
 
 
 @tfbp.default_export
-class Punctuator(tfbp.Model):
+class Seq2Seq(tfbp.Model):
     default_hparams = {
         "rnn_layers": 2,
         "batch_size": 32,
         "vocab_size": 20000,
-        "hidden_size": 512,
+        "hidden_size": 256,
         "attention": "bahdanau",  # "bahdanau" or "luong"
+        "attention_pos": 0,
         "optimizer": "sgd",  # "sgd" or "adam"
         "learning_rate": 0.1,
         "num_valid": 1024,  # TODO: choose a good value
@@ -54,17 +97,18 @@ class Punctuator(tfbp.Model):
         self.embed = self._make_embed()
 
         self.encoder = tf.keras.Sequential()
-        self.decoder = tf.keras.Sequential()
         for _ in range(self.hparams.rnn_layers):
             self.encoder.add(tfkl.Bidirectional(self._make_gru()))
-            self.decoder.add(self._make_gru())
 
-        self.decoder_initial_state = tfkl.Dense(self.hparams.hidden_size)
-
-        self.attention = Attention(
-            self.hparams.hidden_size, style=self.hparams.attention
+        self.decoder = Decoder(
+            self.hparams.vocab_size,
+            300,
+            self.hparams.hidden_size,
+            self.hparams.rnn_layers,
+            self.hparams.attention,
+            self.hparams.attention_pos,
+            self.hparams.dropout,
         )
-        self.softmax_dense = tfkl.TimeDistributed(tfkl.Dense(self.hparams.vocab_size))
 
     def _make_embed(self):
         # Embedding matrix. TODO: move data-dependent stuff to data loader.
@@ -103,18 +147,21 @@ class Punctuator(tfbp.Model):
         encoder_inputs = self.embed(x)
         encoded = self.encoder(encoder_inputs)
 
-        # TODO: what if we don't have y?
+        decoded = None
         if self.method == "fit":
             # Teacher forcing: prepend a <sos> token to the start of every sequence.
-            decoder_inputs = self.embed(tf.concat([[[2]] * y.shape[0], y], 1))
+            decoder_in = self.embed(tf.concat([[[2]] * y.shape[0], y], 1))
             # Choose a decoder initial state.
-            initial_state = self.decoder_initial_state(encoded[:, 0])
-            decoded = self.decoder(decoder_inputs, initial_state=initial_state)
-            decoded = self.attention(decoded, encoded)
+            decoded = self.decoder([decoder_in, encoded])
+        else:
+            # TODO:
+            ...
 
-        return self.softmax_dense(decoded)
+        return decoded
 
     def fit(self, data_loader):
+        """Method invoked by `run.py`."""
+
         # Loss function.
         loss_fn = tf.losses.CategoricalCrossentropy(reduction=tf.losses.Reduction.NONE)
 
@@ -163,11 +210,12 @@ class Punctuator(tfbp.Model):
             print(f"Epoch {self.epoch.numpy()} finished")
             self.epoch.assign_add(1)
 
-            eval_score = self._evaluate(valid_dataset_orig)
+            eval_score = self._evaluate(valid_dataset_orig, data_loader.id_to_word)
             if eval_score > max_eval_score:
                 self.save()
 
     def _predict(self, x):
+        """Beam search based output for input sequences."""
         seq_lengths = tf.reduce_sum(tf.cast(tf.math.not_equal(x, 0), tf.int64), axis=1)
         return tf.keras.backend.ctc_decode(
             self(x),
@@ -176,14 +224,23 @@ class Punctuator(tfbp.Model):
             beam_width=self.hparams.beam_width,
         )
 
-    def _evaluate(self, dataset):
-        ...
+    def _evaluate(self, dataset, id_to_word):
+        """Levenshtein distance evaluation."""
+        scores = []
+        for x, y in dataset:
+            y_sys = id_to_word(self._predict(x)).numpy()
+            y = id_to_word(y).numpy()
+            for pred, gold in zip(y_sys, y):
+                scores.append(editdistance.eval(y_sys, y) / len(y))
+        return sum(scores) / len(scores)
 
     def evaluate(self, data_loader):
+        """Method invoked by `run.py`."""
         dataset = data_loader()
-        return self._evaluate(dataset)
+        return self._evaluate(dataset, data_loader.id_to_word)
 
     def interact(self, data_loader):
+        """Method invoked by `run.py`."""
         print("Press Ctrl+C to quit.\n")
         dataset = data_loader()
         for x in dataset:
