@@ -7,7 +7,7 @@ import boilerplate as tfbp
 
 @tfbp.default_export
 class WikiText(tfbp.DataLoader):
-    default_hparams = {"batch_size": 32, "corpus": 2, "seq_len": 40}
+    default_hparams = {"batch_size": 32, "corpus": 2, "max_seq_len": 40}
 
     def call(self):
         if self.hparams.corpus == 2:
@@ -81,8 +81,10 @@ class WikiText(tfbp.DataLoader):
             return dataset.map(self._batch_to_ids)
 
     def _batch_to_ids(self, batch):
-        ragged = tf.strings.split(batch + " <eos>")
-        return self.word_to_id.lookup(ragged.to_tensor(default_value="<pad>"))
+        padded = tf.strings.split(batch + " <eos>").to_tensor(default_value="<pad>")
+        if self.hparams.max_seq_len:
+            padded = padded[:, : self.hparams.max_seq_len, :]
+        return self.word_to_id.lookup(padded)
 
     def _batch_pairs_to_ids(self, dataset):
         dataset = dataset.batch(self.hparams.batch_size)
