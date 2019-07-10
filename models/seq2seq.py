@@ -1,6 +1,7 @@
 """Word-level seq2seq model with attention."""
 
 import os
+import re
 
 import editdistance
 from gensim.models import KeyedVectors
@@ -55,30 +56,27 @@ class Decoder(tfkl.Layer):
         self.num_layers = num_layers
         self.attention_pos = attention_pos
 
-        # Initial states for the decoder are outputted by W1(enc_out[0]).
-        self.W1 = tfkl.Dense(num_layers * hidden_size, activation=tf.math.tanh)
         self.grus = [
-            tfkl.GRU(hidden_size, dropout=dropout, return_sequences=True)
+            tfkl.GRU(
+                hidden_size, dropout=dropout, return_sequences=True, return_state=True
+            )
             for _ in range(num_layers)
         ]
         self.attention = Attention(hidden_size, style=attention)
         self.W2 = tfkl.TimeDistributed(tfkl.Dense(vocab_size, activation=tf.nn.softmax))
 
     def call(self, x):
-        dec_in, enc_out = x
-
-        initial_states = tf.reshape(
-            self.W1(enc_out[:, 0, :]), [-1, self.num_layers, self.hidden_size]
-        )
-        initial_states = tf.unstack(initial_states, self.num_layers, axis=1)
+        dec_in, dec_st, enc_out = x
+        new_dec_st = []
 
         for i in range(self.num_layers + 1):
             if i == self.attention_pos:
                 dec_in = tf.concat([self.attention([dec_in, enc_out]), dec_in], 2)
             if i < self.num_layers:
-                dec_in = self.grus[i](dec_in, initial_state=initial_states[i])
+                dec_in, st = self.grus[i](dec_in, initial_state=dec_st[i])
+                new_dec_st.append(st)
 
-        return self.W2(dec_in)
+        return self.W2(dec_in), new_dec_st
 
 
 @tfbp.default_export
@@ -121,6 +119,11 @@ class Seq2Seq(tfbp.Model):
                 )
             )
 
+        # Initial states for the decoder are outputted by W1(enc_out[0]).
+        self.decoder_initial_state_dense = tfkl.Dense(
+            self.hparams.rnn_layers * self.hparams.hidden_size, activation=tf.math.tanh
+        )
+
         self.decoder = Decoder(
             self.hparams.vocab_size,
             self.hparams.hidden_size,
@@ -162,18 +165,38 @@ class Seq2Seq(tfbp.Model):
         if self.method == "fit":
             x, y = x
 
-        encoder_inputs = self.embed(x)
-        encoded = self.encoder(encoder_inputs)
+        enc_in = self.embed(x)
+        enc_out = self.encoder(enc_in)
 
-        decoded = None
+        # Decoder initial state and input.
+        dec_st = self.decoder_initial_state_dense(enc_out[:, 0, :])
+        dec_st = tf.reshape(
+            dec_st, [-1, self.hparams.rnn_layers, self.hparams.hidden_size]
+        )
+        dec_st = tf.unstack(dec_st, self.hparams.rnn_layers, axis=1)
+
+        sos_ids = tf.cast([[2]] * x.shape[0], tf.int64)
+
         if self.method == "fit":
             # Teacher forcing: prepend a <sos> token to the start of every sequence.
-            decoder_in = self.embed(tf.concat([[[2]] * y.shape[0], y[:, :-1]], 1))
-            decoded = self.decoder([decoder_in, encoded])
+            dec_in = self.embed(tf.concat([sos_ids, y[:, :-1]], 1))
+            dec_out, _ = self.decoder([dec_in, dec_st, enc_out])
 
-        ...
+        else:
+            dec_in = self.embed(sos_ids)
+            dec_out = []
 
-        return decoded
+            # Give some extra space for decoding. TODO: generalize to other tasks.
+            for _ in range(x.shape[1] + 20):
+                out, dec_st = self.decoder([dec_in, dec_st, enc_out])
+                # Greedy decoding: next input = embed of max likelihood output token.
+                next_token = tf.argmax(out, axis=-1)
+                dec_in = self.embed(next_token)
+                dec_out.append(out)
+
+            dec_out = tf.squeeze(tf.stack(dec_out, axis=1), 2)
+
+        return dec_out
 
     def fit(self, data_loader):
         """Method invoked by `run.py`."""
@@ -228,7 +251,9 @@ class Seq2Seq(tfbp.Model):
             print(f"Epoch {self.epoch.numpy()} finished")
             self.epoch.assign_add(1)
 
-            eval_score = self._evaluate(valid_dataset_orig, data_loader.id_to_word)
+            eval_score = self._evaluate(
+                valid_dataset_orig, data_loader.id_to_word.lookup
+            )
             if eval_score > max_eval_score:
                 self.save()
                 with valid_writer.as_default():
@@ -236,13 +261,14 @@ class Seq2Seq(tfbp.Model):
 
     def _predict(self, x):
         """Beam search based output for input sequences."""
-        seq_lengths = tf.reduce_sum(tf.cast(tf.math.not_equal(x, 0), tf.int64), axis=1)
+        y = self(x)
+        seq_lengths = tf.expand_dims(y.shape[1], 0)
         return tf.keras.backend.ctc_decode(
-            self(x),
+            y,
             seq_lengths,
             greedy=(self.hparams.beam_width == 1),
             beam_width=self.hparams.beam_width,
-        )
+        )[0]
 
     def _evaluate(self, dataset, id_to_word):
         """Levenshtein distance evaluation."""
@@ -257,13 +283,13 @@ class Seq2Seq(tfbp.Model):
     def evaluate(self, data_loader):
         """Method invoked by `run.py`."""
         dataset = data_loader()
-        return self._evaluate(dataset, data_loader.id_to_word)
+        return self._evaluate(dataset, data_loader.id_to_word.lookup)
 
     def interact(self, data_loader):
         """Method invoked by `run.py`."""
-        print("Press Ctrl+C to quit.\n")
         dataset = data_loader()
         for x in dataset:
-            y = self._predict(x)
-            y = data_loader.id_to_word(y)
-            print(y + "\n")
+            y = data_loader.id_to_word.lookup(self._predict(x)[0][0]).numpy()
+            y = " ".join([token.decode("utf-8") for token in y])
+            y = re.sub(r" <eos>.*", "", y)
+            print("Output sentence:", y + "\n")
