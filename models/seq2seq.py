@@ -218,7 +218,7 @@ class Seq2Seq(tfbp.Model):
         # Train/validation split. Keep a copy of the original validation data to
         # evalute at the end of every epoch without falling to an infinite loop.
         train_dataset, valid_dataset_orig = data_loader()
-        valid_dataset = iter(valid_dataset_orig)
+        valid_dataset = iter(valid_dataset_orig.repeat())
 
         # TensorBoard writers.
         train_writer = tf.summary.create_file_writer(
@@ -254,20 +254,19 @@ class Seq2Seq(tfbp.Model):
                         tf.summary.scalar("perplexity", tf.exp(valid_loss), step=step)
 
                 if step % 1000 == 0:
-                    self.save()
+                    eval_score = self._evaluate(
+                        valid_dataset_orig, data_loader.id_to_word.lookup
+                    )
+                    with valid_writer.as_default():
+                        tf.summary.scalar("edit_distance", eval_score, step=step)
+                    if eval_score > max_eval_score:
+                        self.save()
 
                 print("Step {} (train_loss={:.4f})".format(step, train_loss))
                 self.step.assign_add(1)
 
             print(f"Epoch {self.epoch.numpy()} finished")
             self.epoch.assign_add(1)
-
-            eval_score = self._evaluate(
-                valid_dataset_orig, data_loader.id_to_word.lookup
-            )
-            with valid_writer.as_default():
-                tf.summary.scalar("edit_distance", eval_score, step=step)
-            self.save()
 
     def _predict(self, x, id_to_word):
         """Beam search based output for input sequences."""
