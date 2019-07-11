@@ -260,10 +260,9 @@ class Seq2Seq(tfbp.Model):
             eval_score = self._evaluate(
                 valid_dataset_orig, data_loader.id_to_word.lookup
             )
-            if eval_score > max_eval_score:
-                self.save()
-                with valid_writer.as_default():
-                    tf.summary.scalar("edit_distance", eval_score, step=step)
+            with valid_writer.as_default():
+                tf.summary.scalar("edit_distance", eval_score, step=step)
+            self.save()
 
     def _predict(self, x, id_to_word):
         """Beam search based output for input sequences."""
