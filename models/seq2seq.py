@@ -94,10 +94,9 @@ class Seq2Seq(tfbp.Model):
         "hidden_size": 256,
         "attention": "bahdanau",  # "bahdanau" or "luong"
         "attention_pos": 0,
-        "optimizer": "sgd",  # "sgd" or "adam"
-        "learning_rate": 0.1,
-        "num_valid": 1024,  # TODO: choose a good value
-        "epochs": 20,
+        "optimizer": "adam",  # "sgd" or "adam"
+        "learning_rate": 0.0005,
+        "epochs": 5,
         "dropout": 0.0,
         "beam_width": 5,
         "corpus": 2,  # 2 or 103
