@@ -254,9 +254,11 @@ class Seq2Seq(tfbp.Model):
                         tf.summary.scalar("perplexity", tf.exp(valid_loss), step=step)
 
                 if step % 1000 == 0:
+                    self._method = "evaluate"
                     eval_score = self._evaluate(
                         valid_dataset_orig, data_loader.id_to_word.lookup
                     )
+                    self._method = "fit"
                     with valid_writer.as_default():
                         tf.summary.scalar("edit_distance", eval_score, step=step)
                     if eval_score > max_eval_score:
