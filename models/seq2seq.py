@@ -33,13 +33,15 @@ class Attention(tfkl.Layer):
 
     def call(self, x):
         h, e = x
-        h = tf.expand_dims(h, 2)
-        e = tf.expand_dims(e, 1)
 
         if self.style == "bahdanau":
+            h = tf.expand_dims(h, 2)
+            e = tf.expand_dims(e, 1)
             score = self.V(tf.math.tanh(self.W1(e) + self.W2(h)))
         else:
-            score = e @ self.W(h)
+            # Luong attention.
+            score = tf.expand_dims(self.W(h) @ tf.transpose(e, perm=[0, 2, 1]), 3)
+            e = tf.expand_dims(e, 1)
 
         return tf.reduce_sum(tf.nn.softmax(score, axis=2) * e, axis=2)
 
@@ -120,7 +122,8 @@ class Seq2Seq(tfbp.Model):
                 tfkl.Bidirectional(
                     tfkl.GRU(
                         self.hparams.hidden_size, dropout=dropout, return_sequences=True
-                    )
+                    ),
+                    merge_mode="sum",
                 )
             )
 
