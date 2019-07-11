@@ -83,7 +83,7 @@ class WikiText(tfbp.DataLoader):
     def _batch_to_ids(self, batch):
         padded = tf.strings.split(batch + " <eos>").to_tensor(default_value="<pad>")
         if self.hparams.max_seq_len:
-            padded = padded[:, : self.hparams.max_seq_len, :]
+            padded = padded[:, : self.hparams.max_seq_len]
         return self.word_to_id.lookup(padded)
 
     def _batch_pairs_to_ids(self, dataset):

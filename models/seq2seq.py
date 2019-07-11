@@ -12,6 +12,12 @@ import tensorflow.keras.layers as tfkl
 import boilerplate as tfbp
 
 
+def _seq_to_str(seq, id_to_word):
+    seq = id_to_word(seq).numpy()
+    seq = " ".join([token.decode("utf-8") for token in seq])
+    return re.sub(r" <eos>.*", "", seq)
+
+
 class Attention(tfkl.Layer):
     """Attention mechanism."""
 
@@ -259,23 +265,25 @@ class Seq2Seq(tfbp.Model):
                 with valid_writer.as_default():
                     tf.summary.scalar("edit_distance", eval_score, step=step)
 
-    def _predict(self, x):
+    def _predict(self, x, id_to_word):
         """Beam search based output for input sequences."""
         y = self(x)
-        seq_lengths = tf.expand_dims(y.shape[1], 0)
-        return tf.keras.backend.ctc_decode(
+        seq_lengths = tf.tile([y.shape[1]], [y.shape[0]])
+        result, _ = tf.keras.backend.ctc_decode(
             y,
             seq_lengths,
             greedy=(self.hparams.beam_width == 1),
             beam_width=self.hparams.beam_width,
-        )[0]
+            top_paths=1,
+        )
+        return [_seq_to_str(seq, id_to_word) for seq in result[0]]
 
     def _evaluate(self, dataset, id_to_word):
         """Levenshtein distance evaluation."""
         scores = []
         for x, y in dataset:
-            y_sys = id_to_word(self._predict(x)).numpy()
-            y = id_to_word(y).numpy()
+            y = [_seq_to_str(seq, id_to_word) for seq in y]
+            y_sys = self._predict(x, id_to_word)[0]
             for pred, gold in zip(y_sys, y):
                 scores.append(editdistance.eval(y_sys, y) / len(y))
         return sum(scores) / len(scores)
@@ -283,13 +291,11 @@ class Seq2Seq(tfbp.Model):
     def evaluate(self, data_loader):
         """Method invoked by `run.py`."""
         dataset = data_loader()
-        return self._evaluate(dataset, data_loader.id_to_word.lookup)
+        print(self._evaluate(dataset, data_loader.id_to_word.lookup))
 
     def interact(self, data_loader):
         """Method invoked by `run.py`."""
         dataset = data_loader()
         for x in dataset:
-            y = data_loader.id_to_word.lookup(self._predict(x)[0][0]).numpy()
-            y = " ".join([token.decode("utf-8") for token in y])
-            y = re.sub(r" <eos>.*", "", y)
+            y = self._predict(x, data_loader.id_to_word.lookup)[0]
             print("Output sentence:", y + "\n")
