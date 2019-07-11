@@ -246,9 +246,12 @@ class Seq2Seq(tfbp.Model):
                     valid_loss = self._loss(y, self([x, y]))
 
                     with train_writer.as_default():
-                        tf.summary.scalar("cross_entropy", train_loss, step=step)
+                        tf.summary.scalar("perplexity", tf.exp(train_loss), step=step)
                     with valid_writer.as_default():
-                        tf.summary.scalar("cross_entropy", valid_loss, step=step)
+                        tf.summary.scalar("perplexity", tf.exp(valid_loss), step=step)
+
+                if step % 1000 == 0:
+                    self.save()
 
                 print("Step {} (train_loss={:.4f})".format(step, train_loss))
                 self.step.assign_add(1)
