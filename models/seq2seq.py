@@ -259,10 +259,11 @@ class Seq2Seq(tfbp.Model):
                         tf.summary.scalar("perplexity", tf.exp(valid_loss), step=step)
 
                     print("Sample validation input:")
+                    print(_seq_to_str(x[0], data_loader.id_to_word.lookup))
+                    print("Sample validation target:")
                     print(_seq_to_str(y[0], data_loader.id_to_word.lookup))
-                    y0 = valid_probs[0]
                     print("Sample validation output (teacher forcing):")
-                    valid_out = tf.argmax(y0, axis=-1)
+                    valid_out = tf.argmax(valid_probs[0], axis=-1)
                     print(_seq_to_str(valid_out, data_loader.id_to_word.lookup))
                     print("Sample validation output (greedy decoding):")
                     x0 = tf.expand_dims(x[0], 0)
@@ -284,7 +285,6 @@ class Seq2Seq(tfbp.Model):
         """Beam search based output for input sequences."""
         y = self(x)
         seq_lengths = tf.tile([y.shape[1]], [y.shape[0]])
-        print("decoding")
         result, _ = tf.keras.backend.ctc_decode(
             y,
             seq_lengths,
