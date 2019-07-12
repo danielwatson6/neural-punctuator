@@ -171,7 +171,10 @@ class Seq2Seq(tfbp.Model):
     def call(self, x):
         y = None
         if self.method == "fit":
-            x, y = x
+            try:
+                x, y = x
+            except ValueError:
+                pass
 
         enc_in = self.embed(x)
         enc_out = self.encoder(enc_in)
@@ -185,17 +188,12 @@ class Seq2Seq(tfbp.Model):
 
         sos_ids = tf.cast([[2]] * x.shape[0], tf.int64)
 
-        if self.method == "fit":
-            # Teacher forcing: prepend a <sos> token to the start of every sequence.
-            dec_in = self.embed(tf.concat([sos_ids, y[:, :-1]], 1))
-            dec_out, _ = self.decoder([dec_in, dec_st, enc_out])
-
-        else:
+        if y is None:
             dec_in = self.embed(sos_ids)
             dec_out = []
 
             # Give some extra space for decoding. TODO: generalize to other tasks.
-            for _ in range(x.shape[1] + 20):
+            for i in range(x.shape[1] + 20):
                 out, dec_st = self.decoder([dec_in, dec_st, enc_out])
                 # Greedy decoding: next input = embed of max likelihood output token.
                 next_token = tf.argmax(out, axis=-1)
@@ -203,6 +201,11 @@ class Seq2Seq(tfbp.Model):
                 dec_out.append(out)
 
             dec_out = tf.squeeze(tf.stack(dec_out, axis=1), 2)
+
+        else:
+            # Teacher forcing: prepend a <sos> token to the start of every sequence.
+            dec_in = self.embed(tf.concat([sos_ids, y[:, :-1]], 1))
+            dec_out, _ = self.decoder([dec_in, dec_st, enc_out])
 
         return dec_out
 
@@ -238,7 +241,8 @@ class Seq2Seq(tfbp.Model):
                     self([x, y])
 
                 with tf.GradientTape() as g:
-                    train_loss = self._loss(y, self([x, y]))
+                    train_probs = self([x, y])
+                    train_loss = self._loss(y, train_probs)
 
                 grads = g.gradient(train_loss, self.trainable_weights)
                 opt.apply_gradients(zip(grads, self.trainable_weights))
@@ -246,12 +250,25 @@ class Seq2Seq(tfbp.Model):
                 step = self.step.numpy()
                 if step % 100 == 0:
                     x, y = next(valid_dataset)
-                    valid_loss = self._loss(y, self([x, y]))
+                    valid_probs = self([x, y])
+                    valid_loss = self._loss(y, valid_probs)
 
                     with train_writer.as_default():
                         tf.summary.scalar("perplexity", tf.exp(train_loss), step=step)
                     with valid_writer.as_default():
                         tf.summary.scalar("perplexity", tf.exp(valid_loss), step=step)
+
+                    print("Sample validation input:")
+                    print(_seq_to_str(y[0], data_loader.id_to_word.lookup))
+                    y0 = valid_probs[0]
+                    print("Sample validation output (teacher forcing):")
+                    valid_out = tf.argmax(y0, axis=-1)
+                    print(_seq_to_str(valid_out, data_loader.id_to_word.lookup))
+                    print("Sample validation output (greedy decoding):")
+                    x0 = tf.expand_dims(x[0], 0)
+                    print(
+                        self._predict(x0, data_loader.id_to_word.lookup)[0], flush=True
+                    )
 
                 if step % 1000 == 0:
                     self.save()
@@ -267,6 +284,7 @@ class Seq2Seq(tfbp.Model):
         """Beam search based output for input sequences."""
         y = self(x)
         seq_lengths = tf.tile([y.shape[1]], [y.shape[0]])
+        print("decoding")
         result, _ = tf.keras.backend.ctc_decode(
             y,
             seq_lengths,
