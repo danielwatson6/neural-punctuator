@@ -263,7 +263,7 @@ class Seq2Seq(tfbp.Model):
             self.epoch.assign_add(1)
             self.save()
 
-    def _predict(self, x, data_loader):
+    def _predict(self, x, id_to_word):
         """Beam search based output for input sequences."""
         y = self(x)
         seq_lengths = tf.tile([y.shape[1]], [y.shape[0]])
