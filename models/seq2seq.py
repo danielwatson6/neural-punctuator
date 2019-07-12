@@ -254,23 +254,16 @@ class Seq2Seq(tfbp.Model):
                         tf.summary.scalar("perplexity", tf.exp(valid_loss), step=step)
 
                 if step % 1000 == 0:
-                    self._method = "evaluate"
-                    eval_score = self._evaluate(
-                        valid_dataset_orig, data_loader.id_to_word.lookup
-                    )
-                    self._method = "fit"
-                    with valid_writer.as_default():
-                        tf.summary.scalar("edit_distance", eval_score, step=step)
-                    if eval_score > max_eval_score:
-                        self.save()
+                    self.save()
 
                 print("Step {} (train_loss={:.4f})".format(step, train_loss))
                 self.step.assign_add(1)
 
             print(f"Epoch {self.epoch.numpy()} finished")
             self.epoch.assign_add(1)
+            self.save()
 
-    def _predict(self, x, id_to_word):
+    def _predict(self, x, data_loader):
         """Beam search based output for input sequences."""
         y = self(x)
         seq_lengths = tf.tile([y.shape[1]], [y.shape[0]])
@@ -284,7 +277,12 @@ class Seq2Seq(tfbp.Model):
         return [_seq_to_str(seq, id_to_word) for seq in result[0]]
 
     def _evaluate(self, dataset, id_to_word):
-        """Levenshtein distance evaluation."""
+        """Levenshtein distance evaluation.
+
+        Kept as a separate method in case we want to evaluate durining training (e.g.
+        per-epoch evaluations to allow remembering the optimal stopping point).
+
+        """
         scores = []
         for x, y in dataset:
             y = [_seq_to_str(seq, id_to_word) for seq in y]
