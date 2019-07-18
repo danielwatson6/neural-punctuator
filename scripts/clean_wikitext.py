@@ -1,3 +1,17 @@
+"""Script to clean the Wikitext data and segment it to the sentence-level.
+
+The following special word-level tokens are introduced:
+    <pad>: used for batch processing of variable-length sentences
+    <unk>: unknown, out-of-vocabulary tokens
+    <sos>: start-of-sentence token
+    <eos>: end-of-sentence token
+    <dash>: dash inside a compound word
+    <num>: a number
+    <num_dot>: a decimal separator inside a number
+    <num_comma>: a comma separator inside a number
+
+"""
+
 from collections import Counter
 import os
 import re
