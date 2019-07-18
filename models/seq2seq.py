@@ -1,21 +1,25 @@
-"""Word-level seq2seq model with attention."""
+"""Word-level seq2seq model with attention.
+
+Requires data_loader with the following methods:
+    call
+    id_to_sent
+
+Supports the following methods:
+    fit
+    evaluate
+    interact
+
+"""
 
 import os
 import re
 
 import editdistance
-from gensim.models import KeyedVectors
 import numpy as np
 import tensorflow as tf
 import tensorflow.keras.layers as tfkl
 
 import boilerplate as tfbp
-
-
-def _seq_to_str(seq, id_to_word):
-    seq = id_to_word(seq).numpy()
-    seq = " ".join([token.decode("utf-8") for token in seq])
-    return re.sub(r" <eos>.*", "", seq)
 
 
 class Attention(tfkl.Layer):
@@ -143,7 +147,7 @@ class Seq2Seq(tfbp.Model):
 
     def _make_embed(self):
         # Embedding matrix. TODO: move data-dependent stuff to data loader.
-        word2vec = KeyedVectors.load(os.path.join("data", "word2vec"), mmap="r")
+        word2vec = utils.load_word2vec()
         embedding_matrix = np.random.uniform(
             low=-1.0, high=1.0, size=(self.hparams.vocab_size, 300)
         )
@@ -259,17 +263,17 @@ class Seq2Seq(tfbp.Model):
                         tf.summary.scalar("perplexity", tf.exp(valid_loss), step=step)
 
                     print("Sample validation input:")
-                    print(_seq_to_str(x[0], data_loader.id_to_word.lookup))
+                    print(data_loader.id_to_sent(x[0]).numpy().decode("utf-8"))
                     print("Sample validation target:")
-                    print(_seq_to_str(y[0], data_loader.id_to_word.lookup))
+                    print(data_loader.id_to_sent(y[0]).numpy().decode("utf-8"))
+
                     print("Sample validation output (teacher forcing):")
                     valid_out = tf.argmax(valid_probs[0], axis=-1)
-                    print(_seq_to_str(valid_out, data_loader.id_to_word.lookup))
+                    print(data_loader.id_to_sent(valid_out).numpy().decode("utf-8"))
+
                     print("Sample validation output (greedy decoding):")
-                    x0 = tf.expand_dims(x[0], 0)
-                    print(
-                        self._predict(x0, data_loader.id_to_word.lookup)[0], flush=True
-                    )
+                    valid_out = self._predict(tf.expand_dims(x[0], 0))[0]
+                    print(data_loader.id_to_sent(valid_out.numpy().decode("utf-8")))
 
                 if step % 1000 == 0:
                     self.save()
@@ -281,20 +285,21 @@ class Seq2Seq(tfbp.Model):
             self.epoch.assign_add(1)
             self.save()
 
-    def _predict(self, x, id_to_word):
+    def _predict(self, x):
         """Beam search based output for input sequences."""
         y = self(x)
+        # TODO: make use of <eos> tokens to make the lengths shorter when possible.
         seq_lengths = tf.tile([y.shape[1]], [y.shape[0]])
-        result, _ = tf.keras.backend.ctc_decode(
+        result = tf.keras.backend.ctc_decode(
             y,
             seq_lengths,
             greedy=(self.hparams.beam_width == 1),
             beam_width=self.hparams.beam_width,
             top_paths=1,
         )
-        return [_seq_to_str(seq, id_to_word) for seq in result[0]]
+        return result[0]
 
-    def _evaluate(self, dataset, id_to_word):
+    def _evaluate(self, dataset, id_to_sent):
         """Levenshtein distance evaluation.
 
         Kept as a separate method in case we want to evaluate durining training (e.g.
@@ -303,20 +308,22 @@ class Seq2Seq(tfbp.Model):
         """
         scores = []
         for x, y in dataset:
-            y = [_seq_to_str(seq, id_to_word) for seq in y]
-            y_sys = self._predict(x, id_to_word)[0]
+            y = id_to_sent(y)
+            y_sys = id_to_sent(self._predict(x)[0])
             for pred, gold in zip(y_sys, y):
-                scores.append(editdistance.eval(y_sys, y) / len(y))
+                pred = pred.numpy().decode("utf-8")
+                gold = gold.numpy().decode("utf-8")
+                scores.append(editdistance.eval(pred, gold) / len(gold))
         return sum(scores) / len(scores)
 
     def evaluate(self, data_loader):
         """Method invoked by `run.py`."""
         dataset = data_loader()
-        print(self._evaluate(dataset, data_loader.id_to_word.lookup))
+        print(self._evaluate(dataset, data_loader.id_to_sent))
 
     def interact(self, data_loader):
         """Method invoked by `run.py`."""
         dataset = data_loader()
         for x in dataset:
-            y = self._predict(x, data_loader.id_to_word.lookup)[0]
+            y = self._predict(x)[0].numpy().decode("utf-8")
             print("Output sentence:", y + "\n")

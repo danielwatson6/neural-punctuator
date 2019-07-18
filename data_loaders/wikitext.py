@@ -1,3 +1,22 @@
+"""Wikitext data loader.
+
+The following special word-level tokens are introduced:
+    <pad>: used for batch processing of variable-length sentences
+    <unk>: unknown, out-of-vocabulary tokens
+    <sos>: start-of-sentence token
+    <eos>: end-of-sentence token
+    <dash>: dash inside a compound word
+    <num>: a number
+    <num_dot>: a decimal separator inside a number
+    <num_comma>: a comma separator inside a number
+
+The following run.py methods are compatible with this data loader:
+    fit
+    evaluate
+    interact
+
+"""
+
 import os
 
 import tensorflow as tf
@@ -36,8 +55,8 @@ class WikiText(tfbp.DataLoader):
             0,
             vocab_size=self.hparams.vocab_size,
         )
-        self.word_to_id = tf.lookup.StaticHashTable(word_to_id_init, 1)
-        self.id_to_word = tf.lookup.StaticHashTable(id_to_word_init, "<unk>")
+        self.word_to_id = tf.lookup.StaticHashTable(word_to_id_init, 1).lookup
+        self.id_to_word = tf.lookup.StaticHashTable(id_to_word_init, "<unk>").lookup
 
         if self.method == "fit":
             train_inputs = tf.data.TextLineDataset(
@@ -55,8 +74,8 @@ class WikiText(tfbp.DataLoader):
             train_dataset = tf.data.Dataset.zip((train_inputs, train_labels))
             valid_dataset = tf.data.Dataset.zip((valid_inputs, valid_labels))
 
-            train_dataset = self._batch_pairs_to_ids(train_dataset)
-            valid_dataset = self._batch_pairs_to_ids(valid_dataset)
+            train_dataset = self._transform_dataset(train_dataset)
+            valid_dataset = self._transform_dataset(valid_dataset)
 
             return train_dataset, valid_dataset
 
@@ -69,7 +88,7 @@ class WikiText(tfbp.DataLoader):
             )
             test_dataset = tf.data.Dataset.zip((test_inputs, test_labels))
 
-            return self._batch_pairs_to_ids(test_dataset)
+            return self._transform_dataset(test_dataset)
 
         elif self.method == "interact":
 
@@ -78,18 +97,24 @@ class WikiText(tfbp.DataLoader):
                     yield [input("Type a sentence: ")]
 
             dataset = tf.data.Dataset.from_generator(interact_mode_generator, tf.string)
-            return dataset.map(self._batch_to_ids)
+            return dataset.map(self.sent_to_id)
 
-    def _batch_to_ids(self, batch):
-        padded = tf.strings.split(batch + " <eos>").to_tensor(default_value="<pad>")
+    def sent_to_id(self, x):
+        x = tf.strings.split(x + " <eos>").to_tensor(default_value="<pad>")
         if self.hparams.max_seq_len:
-            padded = padded[:, : self.hparams.max_seq_len]
-        return self.word_to_id.lookup(padded)
+            x = x[:, : self.hparams.max_seq_len]
+        return self.word_to_id(x)
 
-    def _batch_pairs_to_ids(self, dataset):
+    def id_to_sent(self, x):
+        x = tf.strings.join(self.id_to_word(x), separator=" ")
+        # Remove " <eos>" and everything after.
+        x = tf.strings.regex_replace(x, r"((?:[^ ]| [^<]| <[^e])*)(?: <e.*)?", r"\1")
+        x = tf.strings.regex_replace(x, r" <dash> ", r"-")
+        x = tf.strings.regex_replace(x, r" <num_dot> ", r"\.")
+        return tf.strings.regex_replace(x, r" <num_comma> ", r",")
+
+    def _transform_dataset(self, dataset):
         dataset = dataset.batch(self.hparams.batch_size)
-        dataset = dataset.map(
-            lambda x, y: (self._batch_to_ids(x), self._batch_to_ids(y))
-        )
+        dataset = dataset.map(lambda x, y: (self.sent_to_id(x), self.sent_to_id(y)))
         dataset = dataset.shuffle(10000)
         return dataset.prefetch(1)
