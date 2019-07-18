@@ -30,19 +30,15 @@ class Model(tf.keras.Model):
         self.hparams = {**self.default_hparams, **hparams}
         self._ckpt = None
 
-        hparams_path = os.path.join(self.save_dir, "hparams.json")
+        hparams_path = os.path.join(save_dir, "hparams.json")
         if os.path.isfile(hparams_path):
             with open(hparams_path) as f:
                 self.hparams = json.load(f)
         else:
-            if not os.path.exists(self.save_dir):
-                os.makedirs(self.save_dir)
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
             with open(hparams_path, "w") as f:
                 json.dump(self.hparams._asdict(), f, indent=4, sort_keys=True)
-
-    @property
-    def save_dir(self):
-        return self._save_dir
 
     @property
     def method(self):
