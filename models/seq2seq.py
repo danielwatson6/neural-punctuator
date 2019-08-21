@@ -15,6 +15,7 @@ import os
 import re
 
 import editdistance
+from gensim.models import KeyedVectors
 import numpy as np
 import tensorflow as tf
 import tensorflow.keras.layers as tfkl
@@ -147,7 +148,7 @@ class Seq2Seq(tfbp.Model):
 
     def _make_embed(self):
         # Embedding matrix. TODO: move data-dependent stuff to data loader.
-        word2vec = utils.load_word2vec()
+        word2vec = KeyedVectors.load(os.path.join("data", "word2vec"), mmap="r")
         embedding_matrix = np.random.uniform(
             low=-1.0, high=1.0, size=(self.hparams.vocab_size, 300)
         )
@@ -269,11 +270,12 @@ class Seq2Seq(tfbp.Model):
 
                     print("Sample validation output (teacher forcing):")
                     valid_out = tf.argmax(valid_probs[0], axis=-1)
+                    print(valid_out)
                     print(data_loader.id_to_sent(valid_out).numpy().decode("utf-8"))
 
                     print("Sample validation output (greedy decoding):")
-                    valid_out = self._predict(tf.expand_dims(x[0], 0))[0]
-                    print(data_loader.id_to_sent(valid_out.numpy().decode("utf-8")))
+                    valid_out = self._predict(tf.expand_dims(x[0], 0))[0][0]
+                    print(data_loader.id_to_sent(valid_out).numpy().decode("utf-8"))
 
                 if step % 1000 == 0:
                     self.save()
