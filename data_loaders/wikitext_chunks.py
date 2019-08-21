@@ -101,8 +101,6 @@ class WikiText(tfbp.DataLoader):
 
     def sent_to_id(self, x):
         x = tf.strings.split(x + " <eos>").to_tensor(default_value="<pad>")
-        if self.hparams.seq_len:
-            x = x[:, : self.hparams.seq_len]
         return self.word_to_id(x)
 
     def id_to_sent(self, x):
@@ -121,7 +119,7 @@ class WikiText(tfbp.DataLoader):
                 for line in f:
                     for word in line.split():
                         if len(buf) == self.hparams.seq_len:
-                            yield buf
+                            yield " ".join(buf)
                             buf = []
                         buf.append(word)
 
@@ -130,5 +128,4 @@ class WikiText(tfbp.DataLoader):
     def _transform_dataset(self, dataset):
         dataset = dataset.batch(self.hparams.batch_size)
         dataset = dataset.map(lambda x, y: (self.sent_to_id(x), self.sent_to_id(y)))
-        dataset = dataset.shuffle(10000)
         return dataset.prefetch(1)
