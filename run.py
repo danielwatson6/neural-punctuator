@@ -23,12 +23,12 @@ if __name__ == "__main__":
         )
         exit(1)
 
-    # TODO: make it possible to infer the model and data_loader fields by reading the
-    # runpy.json file.
-
     parser = ArgumentParser()
     parser.add_argument("method", type=str)
     parser.add_argument("save_dir", type=str)
+    
+    if not os.path.exists("experiments"):
+        os.makedirs("experiments")
 
     # If runpy.json exists, the model and the data loader classes can be inferred and
     # the data loader can be optionally switched. These need to be loaded to get the
@@ -51,6 +51,9 @@ if __name__ == "__main__":
 
         parser.add_argument("model", type=str)
         parser.add_argument("data_loader", type=str)
+        
+        if not os.path.exists(os.path.join("experiments", sys.argv[2])):
+            os.makedirs(os.path.join("experiments", sys.argv[2]))
 
         with open(runpy_json_path, "w") as f:
             json.dump({"model": sys.argv[3], "data_loader": sys.argv[4]}, f)
