@@ -51,16 +51,20 @@ class Model(tf.keras.Model):
     @hparams.setter
     def hparams(self, value):
         self._hparams = Hyperparameters(value)
+    
+    @property
+    def save_dir(self):
+        return self._save_dir
 
     def save(self):
         if self._ckpt is None:
             self._ckpt = tf.train.Checkpoint(model=self)
-        self._ckpt.save(file_prefix=os.path.join(self._save_dir, "model"))
+        self._ckpt.save(file_prefix=os.path.join(self.save_dir, "model"))
 
     def restore(self):
         if self._ckpt is None:
             self._ckpt = tf.train.Checkpoint(model=self)
-        self._ckpt.restore(tf.train.latest_checkpoint(self._save_dir))
+        self._ckpt.restore(tf.train.latest_checkpoint(self.save_dir))
 
 
 class DataLoader:
