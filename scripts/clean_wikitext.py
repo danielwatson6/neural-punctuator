@@ -67,7 +67,7 @@ if __name__ == "__main__":
                         counts[token] += 1
 
                 for line in lines:
-                    no_punctuation = re.sub(r"[^A-Za-z'<>_]", " ", line)
+                    no_punctuation = re.sub(r"[^A-Za-z'<>_,]", " ", line)
                     no_punctuation = shrink_spaces(no_punctuation)
                     wf_inputs.write(no_punctuation + "\n")
                     wf_labels.write(line + "\n")
