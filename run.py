@@ -14,7 +14,7 @@ def getcls(module_str):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 5:
+    if len(sys.argv) < 3:
         print(
             "Usage:\n  New run: python run.py [method] [save_dir] [model] [data_loader]"
             " [hyperparameters...]\n  Existing run: python run.py [method] [save_dir] "
@@ -26,7 +26,7 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("method", type=str)
     parser.add_argument("save_dir", type=str)
-    
+
     if not os.path.exists("experiments"):
         os.makedirs("experiments")
 
@@ -39,8 +39,8 @@ if __name__ == "__main__":
         with open(runpy_json_path) as f:
             classes = json.load(f)
 
-        if len(sys.argv) >= 4 and not sys.argv[4].startswith("--"):
-            classes["data_loader"] = sys.argv[4]
+        if len(sys.argv) >= 4 and not sys.argv[3].startswith("--"):
+            classes["data_loader"] = sys.argv[3]
 
         Model = getcls("models." + classes["model"])
         DataLoader = getcls("data_loaders." + classes["data_loader"])
@@ -51,7 +51,7 @@ if __name__ == "__main__":
 
         parser.add_argument("model", type=str)
         parser.add_argument("data_loader", type=str)
-        
+
         if not os.path.exists(os.path.join("experiments", sys.argv[2])):
             os.makedirs(os.path.join("experiments", sys.argv[2]))
 
