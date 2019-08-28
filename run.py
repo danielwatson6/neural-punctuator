@@ -70,9 +70,9 @@ if __name__ == "__main__":
     FLAGS = parser.parse_args()
     kwargs = {k: v for k, v in FLAGS._get_kwargs()}
 
-    del kwargs["model"]
-    del kwargs["save_dir"]
-    del kwargs["data_loader"]
+    for k in ["model", "save_dir", "data_loader"]:
+        if k in kwargs:
+            del kwargs[k]
 
     model = Model(os.path.join("experiments", FLAGS.save_dir), **kwargs)
     data_loader = DataLoader(**kwargs)
