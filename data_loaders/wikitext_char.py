@@ -134,7 +134,7 @@ class WikiText(tfbp.DataLoader):
         return self.sent_to_id(x), self.sent_to_id(y)
 
     def _transform_dataset(self, dataset):
-        if self.hparams.shuffle:
+        if self.hparams.shuffle and not self.hparams.chunk:
             dataset = dataset.shuffle(10000)
         dataset = dataset.batch(self.hparams.batch_size)
         dataset = dataset.map(self._make_inputs)
