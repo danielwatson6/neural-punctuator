@@ -161,7 +161,9 @@ class Seq2Seq(tfbp.Model):
         corpus = self.hparams.corpus
         if corpus == 103:
             corpus = str(corpus) + "-raw"
-        with open(os.path.join("data", f"wikitext-{corpus}", "wiki.vocab.tsv")) as f:
+        with open(
+            os.path.join("data", f"wikitext-{corpus}", "wiki.vocabulary.tsv")
+        ) as f:
             for i, word in enumerate(f):
                 word = word.strip()
                 if word in word2vec:

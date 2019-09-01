@@ -96,12 +96,12 @@ class WikiText(tfbp.DataLoader):
     def sent_to_id(self, x):
         # Don't split special tokens into characters. To do this, we separate everything
         # except special tokens with tabs, and then split by tabs.
-        x = tf.strings.regex_replace(x, r"(<[^>]+>|[^<])", r"\1\t")
+        x = tf.strings.regex_replace(x + "<eos>", r"(<[^>]+>|[^<])", r"\1\t")
         x = tf.strings.split(x, sep="\t").to_tensor(default_value="<pad>")
 
         if self.method == "train" and not self.hparams.chunk:
             x = x[:, : self.hparams.max_seq_len]
-        return self.char_to_id(x) + self.char_to_id("<eos>")
+        return self.char_to_id(x)
 
     def id_to_sent(self, x):
         x = tf.strings.join(self.id_to_char(x))
