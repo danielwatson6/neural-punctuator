@@ -1,4 +1,4 @@
-"""Word-level seq2seq model with attention.
+"""Seq2seq model with attention.
 
 Requires data_loader with the following methods:
     call
@@ -98,12 +98,13 @@ class Seq2Seq(tfbp.Model):
         "rnn_layers": 2,
         "batch_size": 32,
         "vocab_size": 20000,
+        "embed_size": None,  # set to fixed dimension to not use pre-trained embeddings.
         "hidden_size": 256,
         "attention": "bahdanau",  # "bahdanau" or "luong"
         "attention_pos": 2,
         "optimizer": "adam",  # "sgd" or "adam"
         "learning_rate": 0.0005,
-        "epochs": 5,
+        "epochs": 2,
         "dropout": 0.0,
         "beam_width": 5,
         "corpus": 2,  # 2 or 103
@@ -115,7 +116,12 @@ class Seq2Seq(tfbp.Model):
         self.step = tf.Variable(0, trainable=False)
         self.epoch = tf.Variable(0, trainable=False)
 
-        self.embed = self._make_embed()
+        if self.hparams.embed_size is None:
+            self.embed = self._make_word2vec_embed()
+        else:
+            self.embed = tfkl.Embedding(
+                self.hparams.vocab_size, self.hparams.embed_size
+            )
 
         dropout = 0.0
         if self.method == "fit":
@@ -146,8 +152,8 @@ class Seq2Seq(tfbp.Model):
             dropout=dropout,
         )
 
-    def _make_embed(self):
-        # Embedding matrix. TODO: move data-dependent stuff to data loader.
+    def _make_word2vec_embed(self):
+        # TODO: move data-dependent stuff to the data loader.
         word2vec = KeyedVectors.load(os.path.join("data", "word2vec"), mmap="r")
         embedding_matrix = np.random.uniform(
             low=-1.0, high=1.0, size=(self.hparams.vocab_size, 300)
@@ -285,6 +291,12 @@ class Seq2Seq(tfbp.Model):
 
             print(f"Epoch {self.epoch.numpy()} finished")
             self.epoch.assign_add(1)
+
+            # Per-epoch evaluation.
+            score = self._evaluate(valid_dataset_orig, data_loader.id_to_sent)
+            with valid_writer.as_default():
+                tf.summary.scalar("edit_distance", score, step=step)
+
             self.save()
 
     def _predict(self, x):
