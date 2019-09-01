@@ -67,10 +67,10 @@ class WikiText(tfbp.DataLoader):
 
         if self.method == "fit":
             train_labels = self._create_dataset(
-                os.path.join(data_path, "wiki.train.labels")
+                os.path.join(data_path, "wiki.train.clean")
             )
             valid_labels = self._create_dataset(
-                os.path.join(data_path, "wiki.valid.labels")
+                os.path.join(data_path, "wiki.valid.clean")
             )
             return (
                 self._transform_dataset(train_labels),
@@ -79,7 +79,7 @@ class WikiText(tfbp.DataLoader):
 
         elif self.method == "evaluate":
             test_labels = self._create_dataset(
-                os.path.join(data_path, "wiki.test.labels")
+                os.path.join(data_path, "wiki.test.clean")
             )
             return self._transform_dataset(test_labels)
 
