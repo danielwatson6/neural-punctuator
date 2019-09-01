@@ -17,8 +17,28 @@ import os
 import re
 
 
-def shrink_spaces(s):
-    return re.sub(r" +", " ", s).strip()
+SPECIAL_TOKENS = [
+    "<pad>",
+    "<unk>",
+    "<sos>",
+    "<eos>",
+    "<dash>",
+    "<num>",
+    "<num_dot>",
+    "<num_comma>",
+]
+
+
+def write_tokens(counts, wf):
+    for token in SPECIAL_TOKENS:
+        c = 0
+        if token in counts:
+            c = counts[token]
+            del counts[token]
+        wf.write(f"{token}\t{c}\n")
+
+    for token, count in counts.most_common():
+        wf.write(f"{token}\t{count}\n")
 
 
 if __name__ == "__main__":
@@ -29,65 +49,60 @@ if __name__ == "__main__":
             print(f"wikitext-{corpus} ({partition})\n  cleaning data...")
 
             rf = open(os.path.join(root, f"wiki.{partition}.{extension}"))
-            wf_inputs = open(os.path.join(root, f"wiki.{partition}.inputs"), "w")
-            wf_labels = open(os.path.join(root, f"wiki.{partition}.labels"), "w")
+            wf = open(os.path.join(root, f"wiki.{partition}.clean"), "w")
 
-            counts = None
+            word_counts = None
+            char_counts = None
             if partition == "train":
-                counts = Counter()
+                word_counts = Counter()
+                char_counts = Counter()
 
             for line in rf:
+
                 # Ignore wikipedia headers.
-                line = line.strip()
                 if line == "" or line.startswith(" ="):
                     continue
 
-                line = re.sub(r"[0-9]+", " <num> ", line)
                 line = re.sub(r"@-@", " <dash> ", line)
+                line = re.sub(r"[0-9]+", " <num> ", line)
                 line = re.sub(r"@\.@", " <num_dot> ", line)
                 line = re.sub(r"@,@", " <num_comma> ", line)
-                line = shrink_spaces(line)
+
+                # Shrink spaces.
+                line = re.sub(r"\s+", " ", line).strip()
 
                 # Segment into sentences / independent clauses by tokenised '.', ';'.
                 lines = []
                 line_buf = []
-                for token in line.split():
+                for word in line.split():
+                    line_buf.append(word)
 
                     # Check for end of "sentence".
-                    if token in [".", ";"]:
-                        line_buf.append(token)
+                    if word in [".", ";"]:
                         lines.append(" ".join(line_buf))
                         line_buf = []
-                    else:
-                        line_buf.append(token)
 
                     if partition == "train":
-                        if token not in counts:
-                            counts[token] = 0
-                        counts[token] += 1
+                        word_counts[word] += 1
+
+                        # Special tokens should not be segmented into characters.
+                        if word in SPECIAL_TOKENS:
+                            char_counts[word] += 1
+                        else:
+                            for char in word:
+                                char_counts[char] += 1
 
                 for line in lines:
-                    no_punctuation = re.sub(r"[^A-Za-z'<>_,]", " ", line)
-                    no_punctuation = shrink_spaces(no_punctuation)
-                    wf_inputs.write(no_punctuation + "\n")
-                    wf_labels.write(line + "\n")
-
-            # Write tokens sorted by frequency.
-            if partition == "train":
-                print("  sorting vocabulary...")
-                with open(os.path.join(root, f"wiki.vocab.tsv"), "w") as wf_voc:
-
-                    # Special tokens first!
-                    unk_count = counts["<unk>"]
-                    del counts["<unk>"]
-                    wf_voc.write("<pad>\t0\n")
-                    wf_voc.write(f"<unk>\t{unk_count}\n")
-                    wf_voc.write("<sos>\t0\n")
-                    wf_voc.write("<eos>\t0\n")
-
-                    for token, count in counts.most_common():
-                        wf_voc.write(f"{token}\t{count}\n")
+                    wf.write(line + "\n")
 
             rf.close()
-            wf_inputs.close()
-            wf_labels.close()
+            wf.close()
+
+            if partition == "train":
+                print("  sorting train vocabulary...")
+                with open(os.path.join(root, f"wiki.vocabulary.tsv"), "w") as f:
+                    write_tokens(word_counts, f)
+
+                print("  sorting train alphabet...")
+                with open(os.path.join(root, "wiki.alphabet.tsv"), "w") as f:
+                    write_tokens(char_counts, f)

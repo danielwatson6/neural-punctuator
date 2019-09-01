@@ -1,4 +1,4 @@
-"""Wikitext data loader.
+"""Word-level wikitext data loader.
 
 The following special word-level tokens are introduced:
     <pad>: used for batch processing of variable-length sentences
@@ -18,6 +18,7 @@ The following run.py methods are compatible with this data loader:
 """
 
 import os
+import re
 
 import tensorflow as tf
 
@@ -26,7 +27,13 @@ import boilerplate as tfbp
 
 @tfbp.default_export
 class WikiText(tfbp.DataLoader):
-    default_hparams = {"batch_size": 32, "corpus": 2, "seq_len": 40}
+    default_hparams = {
+        "batch_size": 32,
+        "corpus": 2,
+        "max_seq_len": 400,
+        "vocab_size": 128,
+        "shuffle": True,
+    }
 
     def call(self):
         if self.hparams.corpus == 2:
@@ -36,10 +43,10 @@ class WikiText(tfbp.DataLoader):
         else:
             raise ValueError("`corpus` hyperparameter can only attain values 2 or 103.")
 
-        vocab_path = os.path.join(data_path, "wiki.vocab.tsv")
+        vocab_path = os.path.join(data_path, "wiki.alphabet.tsv")
 
         # Args: filename, key_dtype, key_index, value_dtype, value_index, vocab_size
-        word_to_id_init = tf.lookup.TextFileInitializer(
+        char_to_id_init = tf.lookup.TextFileInitializer(
             vocab_path,
             tf.string,
             0,
@@ -47,7 +54,7 @@ class WikiText(tfbp.DataLoader):
             tf.lookup.TextFileIndex.LINE_NUMBER,
             vocab_size=self.hparams.vocab_size,
         )
-        id_to_word_init = tf.lookup.TextFileInitializer(
+        id_to_char_init = tf.lookup.TextFileInitializer(
             vocab_path,
             tf.int64,
             tf.lookup.TextFileIndex.LINE_NUMBER,
@@ -55,56 +62,48 @@ class WikiText(tfbp.DataLoader):
             0,
             vocab_size=self.hparams.vocab_size,
         )
-        self.word_to_id = tf.lookup.StaticHashTable(word_to_id_init, 1).lookup
-        self.id_to_word = tf.lookup.StaticHashTable(id_to_word_init, "<unk>").lookup
+        self.char_to_id = tf.lookup.StaticHashTable(char_to_id_init, 1).lookup
+        self.id_to_char = tf.lookup.StaticHashTable(id_to_char_init, "<unk>").lookup
 
         if self.method == "fit":
-            train_inputs = self._create_dataset(
-                os.path.join(data_path, "wiki.train.inputs")
-            )
-            train_labels = self._create_dataset(
+            train_labels = tf.data.TextLineDataset(
                 os.path.join(data_path, "wiki.train.labels")
             )
-            valid_inputs = self._create_dataset(
-                os.path.join(data_path, "wiki.valid.inputs")
-            )
-            valid_labels = self._create_dataset(
+            valid_labels = tf.data.TextLineDataset(
                 os.path.join(data_path, "wiki.valid.labels")
             )
-            train_dataset = tf.data.Dataset.zip((train_inputs, train_labels))
-            valid_dataset = tf.data.Dataset.zip((valid_inputs, valid_labels))
-
-            train_dataset = self._transform_dataset(train_dataset)
-            valid_dataset = self._transform_dataset(valid_dataset)
-
-            return train_dataset, valid_dataset
+            return (
+                self._transform_dataset(train_labels),
+                self._transform_dataset(valid_labels),
+            )
 
         elif self.method == "evaluate":
-            test_inputs = tf.data.TextLineDataset(
-                os.path.join(data_path, "wiki.test.inputs")
-            )
             test_labels = tf.data.TextLineDataset(
                 os.path.join(data_path, "wiki.test.labels")
             )
-            test_dataset = tf.data.Dataset.zip((test_inputs, test_labels))
-
-            return self._transform_dataset(test_dataset)
+            return self._transform_dataset(test_labels)
 
         elif self.method == "interact":
 
-            def g():
+            def interact_mode_generator():
                 while True:
                     yield [input("Type a sentence: ")]
 
-            dataset = tf.data.Dataset.from_generator(g, tf.string)
+            dataset = tf.data.Dataset.from_generator(interact_mode_generator, tf.string)
             return dataset.map(self.sent_to_id)
 
     def sent_to_id(self, x):
-        x = tf.strings.split(x + " <eos>").to_tensor(default_value="<pad>")
-        return self.word_to_id(x)
+        # Don't split special tokens into characters. To do this, we separate everything
+        # except special tokens with tabs, and then split by tabs.
+        x = tf.strings.regex_replace(x, r"(<[^>]+>|[^<])", r"\1\t")
+        x = tf.strings.split(x, sep="\t").to_tensor(default_value="<pad>")
+
+        if self.method == "train" and not self.hparams.chunk:
+            x = x[:, : self.hparams.max_seq_len]
+        return self.char_to_id(x) + self.char_to_id("<eos>")
 
     def id_to_sent(self, x):
-        x = tf.strings.join(self.id_to_word(x), separator=" ")
+        x = tf.strings.join(self.id_to_char(x))
         # Remove " <eos>" and everything after.
         x = tf.strings.regex_replace(x, r"((?:[^ ]| [^<]| <[^e])*)(?: <e.*)?", r"\1")
         x = tf.strings.regex_replace(x, r" <dash> ", r"-")
@@ -112,20 +111,30 @@ class WikiText(tfbp.DataLoader):
         return tf.strings.regex_replace(x, r" <num_comma> ", r",")
 
     def _create_dataset(self, path):
+        if not self.hparams.chunk:
+            return tf.data.TextLineDataset(path)
 
         def g():
             with open(path) as f:
                 buf = []
                 for line in f:
-                    for word in line.split():
-                        if len(buf) == self.hparams.seq_len:
-                            yield " ".join(buf)
+                    for token in re.sub(r"(<[^>]+>|[^<])", r"\1\t", line).split("\t"):
+                        if len(buf) == self.hparams.max_seq_len:
+                            yield "".join(buf)
                             buf = []
-                        buf.append(word)
+                        buf.append(token)
 
         return tf.data.Dataset.from_generator(g, tf.string)
 
+    def _make_inputs(self, y):
+        x = tf.strings.regex_replace(y, r"\.;", r" ")
+        x = tf.strings.regex_replace(x, r"\s+", r" ")
+        x = tf.strings.strip(x)
+        return self.sent_to_id(x), self.sent_to_id(y)
+
     def _transform_dataset(self, dataset):
+        if self.hparams.shuffle:
+            dataset = dataset.shuffle(10000)
         dataset = dataset.batch(self.hparams.batch_size)
-        dataset = dataset.map(lambda x, y: (self.sent_to_id(x), self.sent_to_id(y)))
+        dataset = dataset.map(self._make_inputs)
         return dataset.prefetch(1)
