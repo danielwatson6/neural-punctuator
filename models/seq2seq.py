@@ -98,7 +98,7 @@ class Seq2Seq(tfbp.Model):
         "rnn_layers": 2,
         "batch_size": 32,
         "vocab_size": 20000,
-        "embed_size": None,  # set to fixed dimension to not use pre-trained embeddings.
+        "embed_size": 300,  # set to !=300 to not use pre-trained embeddings.
         "hidden_size": 256,
         "attention": "bahdanau",  # "bahdanau" or "luong"
         "attention_pos": 2,
@@ -116,7 +116,7 @@ class Seq2Seq(tfbp.Model):
         self.step = tf.Variable(0, trainable=False)
         self.epoch = tf.Variable(0, trainable=False)
 
-        if self.hparams.embed_size is None:
+        if self.hparams.embed_size == 300:
             self.embed = self._make_word2vec_embed()
         else:
             self.embed = tfkl.Embedding(
