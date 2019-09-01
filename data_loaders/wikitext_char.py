@@ -33,6 +33,7 @@ class WikiText(tfbp.DataLoader):
         "max_seq_len": 400,
         "vocab_size": 128,
         "shuffle": True,
+        "chunk": False,
     }
 
     def call(self):
