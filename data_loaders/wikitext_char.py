@@ -96,7 +96,7 @@ class WikiText(tfbp.DataLoader):
     def sent_to_id(self, x):
         # Don't split special tokens into characters. To do this, we separate everything
         # except special tokens with tabs, and then split by tabs.
-        x = tf.strings.regex_replace(x + "<eos>", r"(<[^>]+>|[^<])", r"\1\t")
+        x = tf.strings.regex_replace(x + "<eos>", r"((?:<[^>]+>|[^<]))", r"\1\t")
         x = tf.strings.split(x, sep="\t").to_tensor(default_value="<pad>")
 
         if self.method == "train" and not self.hparams.chunk:
@@ -106,10 +106,11 @@ class WikiText(tfbp.DataLoader):
     def id_to_sent(self, x):
         x = tf.strings.join(self.id_to_char(x))
         # Remove " <eos>" and everything after.
-        x = tf.strings.regex_replace(x, r"((?:[^ ]| [^<]| <[^e])*)(?: <e.*)?", r"\1")
+        x = tf.strings.regex_replace(x, r"((?:[^ ]| [^<]| <[^e])*)(?:<e.*)?", r"\1")
         x = tf.strings.regex_replace(x, r" <dash> ", r"-")
         x = tf.strings.regex_replace(x, r" <num_dot> ", r"\.")
-        return tf.strings.regex_replace(x, r" <num_comma> ", r",")
+        x = tf.strings.regex_replace(x, r" <num_comma> ", r",")
+        return tf.strings.strip(x)
 
     def _create_dataset(self, path):
         if not self.hparams.chunk:
@@ -119,7 +120,8 @@ class WikiText(tfbp.DataLoader):
             with open(path) as f:
                 buf = []
                 for line in f:
-                    for token in re.sub(r"(<[^>]+>|[^<])", r"\1\t", line).split("\t"):
+                    tokens = re.sub(r"((?:<[^>]+>|[^<]))", r"\1\t", line).split("\t")
+                    for token in tokens:
                         if len(buf) == self.hparams.max_seq_len:
                             yield "".join(buf)
                             buf = []
