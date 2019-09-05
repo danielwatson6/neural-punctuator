@@ -96,8 +96,17 @@ class WikiText(tfbp.DataLoader):
     def sent_to_id(self, x):
         # Don't split special tokens into characters. To do this, we separate everything
         # except special tokens with tabs, and then split by tabs.
-        x = tf.strings.regex_replace(x + "<eos>", r"((?:<[^>]+>|[^<]))", r"\1\t")
-        x = tf.strings.split(x, sep="\t").to_tensor(default_value="<pad>")
+        #
+        # The above is the ideal solution, but Google's regexp library seems to have a
+        # nasty bug where the rewrite pattern "\1\t" isn't parsed correctly:
+        # https://github.com/google/re2/blob/master/re2/re2.cc
+        #
+        # Replacing all spaces with tabs, splitting by spaces, and then replacing tabs
+        # with spaces seems to fix the issue.
+        x = tf.strings.regex_replace(x, r" ", r"\t")
+        x = tf.strings.regex_replace(x + "<eos>", r"((?:<[^>]+>|[^<]))", r"\1 ")
+        x = tf.strings.split(tf.strings.strip(x)).to_tensor(default_value="<pad>")
+        x = tf.strings.regex_replace(x, r"\t", r" ")
 
         if self.method == "train" and not self.hparams.chunk:
             x = x[:, : self.hparams.max_seq_len]
