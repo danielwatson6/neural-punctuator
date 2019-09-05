@@ -98,15 +98,14 @@ class WikiText(tfbp.DataLoader):
         # except special tokens with tabs, and then split by tabs.
         #
         # The above is the ideal solution, but Google's regexp library seems to have a
-        # nasty bug where the rewrite pattern "\1\t" isn't parsed correctly:
-        # https://github.com/google/re2/blob/master/re2/re2.cc
+        # nasty bug where we can't add tabs to regular expressions in raw strings.
         #
         # Replacing all spaces with tabs, splitting by spaces, and then replacing tabs
         # with spaces seems to fix the issue.
-        x = tf.strings.regex_replace(x, r" ", r"\t")
+        x = tf.strings.regex_replace(x, " ", "\t")
         x = tf.strings.regex_replace(x + "<eos>", r"((?:<[^>]+>|[^<]))", r"\1 ")
         x = tf.strings.split(tf.strings.strip(x)).to_tensor(default_value="<pad>")
-        x = tf.strings.regex_replace(x, r"\t", r" ")
+        x = tf.strings.regex_replace(x, "\t", " ")
 
         if self.method == "train" and not self.hparams.chunk:
             x = x[:, : self.hparams.max_seq_len]
