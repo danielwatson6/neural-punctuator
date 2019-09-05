@@ -96,10 +96,10 @@ class Decoder(tfkl.Layer):
 class Seq2Seq(tfbp.Model):
     default_hparams = {
         "rnn_layers": 2,
-        "batch_size": 32,
+        "batch_size": 16,
         "vocab_size": 20000,
         "embed_size": 300,  # set to !=300 to not use pre-trained embeddings.
-        "hidden_size": 256,
+        "hidden_size": 128,
         "attention": "bahdanau",  # "bahdanau" or "luong"
         "attention_pos": 2,
         "optimizer": "adam",  # "sgd" or "adam"
@@ -251,6 +251,8 @@ class Seq2Seq(tfbp.Model):
 
                 # TODO: try to remove this
                 if not self.built:
+                    print(x)
+                    print(y)
                     self([x, y])
 
                 with tf.GradientTape() as g:

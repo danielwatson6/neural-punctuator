@@ -28,9 +28,9 @@ import boilerplate as tfbp
 @tfbp.default_export
 class WikiText(tfbp.DataLoader):
     default_hparams = {
-        "batch_size": 32,
+        "batch_size": 16,
         "corpus": 2,
-        "max_seq_len": 400,
+        "max_seq_len": 200,
         "vocab_size": 128,
         "shuffle": True,
         "chunk": False,
