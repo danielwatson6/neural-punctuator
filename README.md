@@ -4,12 +4,12 @@ Seq2Seq model that restores punctuation on English input text.
 
 ## Setup
 
-Python 3.7.4, virtualenv and TensorFlow 2.0.0-beta1 are required to run this project.
+**No dependencies needed besides Python 3.7.4, virtualenv, and TensorFlow.**
+
 ```bash
 virtualenv env
 source env.sh
-pip install -r requirements.txt
-pip install tensorflow==2.0.0-beta1  # or tensorflow-gpu==2.0.0-beta1 / custom wheel
+pip install tensorflow  # or tensorflow-gpu / custom wheel
 ```
 
 For more information on the project structure, see the README in the [tensorflow-boilerplate](https://github.com/danielwatson6/tensorflow-boilerplate) repository.
@@ -22,7 +22,7 @@ For more information on the project structure, see the README in the [tensorflow
 
 ## Usage
 
-To train a model with weights saved in `experiments/myexperiment0` and non-default batch size and learning rate:
+This will train a model with non-default batch size and learning rate, and will save its weights in `experiments/myexperiment0`:
 
 ```bash
 source env.sh
